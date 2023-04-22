@@ -3,7 +3,7 @@ mod models;
 mod services;
 mod utils;
 
-use crate::endpoints::walk_endpoint;
+use crate::endpoints::sortest_path_endpoint;
 use crate::utils::{DEFAULT_LOGGER};
 
 use actix_web::{App, HttpServer};
@@ -24,6 +24,6 @@ async fn main() -> std::io::Result<()> {
         info!("Starting worker for wait new connection");
 
         // Return the app instance
-        App::new().service(walk_endpoint)
+        App::new().service(sortest_path_endpoint)
     }).bind("127.0.0.1:8080")?.run().await
 }

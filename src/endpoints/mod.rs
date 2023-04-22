@@ -4,14 +4,14 @@ use log::info;
 use serde_json::json;
 
 use crate::models::{Matrix, Result};
-use crate::services::Walker;
+use crate::services::sortest_path::SortestPath;
 
 lazy_static! {
     static ref MAX_SIZE: i32 = 16 * 1024 * 1024;
-    static ref WALKER: Walker = Walker::new();
+    static ref WALKER: SortestPath = SortestPath::new();
 }
 
-/// The walk endpoint
+/// The sortest path endpoint
 ///
 /// Exposes a endpoint that receives a matrix with the height and width of the matrix
 /// and the matrix itself and returns the path of the walk
@@ -24,8 +24,8 @@ lazy_static! {
 ///
 /// * `HttpResponder` - The response
 ///
-#[post("/walk")]
-pub async fn walk_endpoint(item: Json<Matrix>) -> HttpResponse {
+#[post("/sortest")]
+pub async fn sortest_path_endpoint(item: Json<Matrix>) -> HttpResponse {
     // Read the request and deserialize it
     let matrix: Matrix = item.into_inner();
 
@@ -61,7 +61,7 @@ pub async fn walk_endpoint(item: Json<Matrix>) -> HttpResponse {
             info!("Received request for matrix: {:?}", matrix);
 
             // Get the path of the walk and return it
-            return match WALKER.get_walk_path(matrix) {
+            return match WALKER.get_sortest_path(matrix) {
                 Ok(path) => HttpResponse::Ok().json(json!({ "status": "ok", "path": path })),
                 Err(err) => HttpResponse::BadGateway().json(json!({
                     "status": "error",
@@ -78,21 +78,29 @@ mod tests {
     use super::*;
 
     #[actix_web::test]
-    async fn test_walk_rest_endpoint() {
+    async fn test_sortest_path_rest_endpoint() {
         // Prepare the matrix
-        let matrix = Matrix::new(3, 3, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+        let matrix = Matrix::new(7, 7, vec![
+            -01.0,  10.0,  18.0, -01.0, -01.0, -01.0, -01.0,
+            -01.0, -01.0,  06.0, -01.0,  03.0, -01.0, -01.0,
+            -01.0, -01.0, -01.0,  03.0, -01.0,  20.0, -01.0,
+            -01.0, -01.0,  02.0, -01.0, -01.0, -01.0,  02.0,
+            -01.0, -01.0, -01.0,  08.0, -01.0, -01.0,  10.0,
+            -01.0, -01.0, -01.0, -01.0, -01.0, -01.0, -01.0,
+            -01.0, -01.0, -01.0, -01.0, -01.0,  05.0, -01.0
+        ]);
 
         // Prepare the expected result
         let expected = vec![1.0, 2.0, 3.0];
 
         // Get the result
         let app = init_service(
-            App::new().service(walk_endpoint)
+            App::new().service(sortest_path_endpoint)
         ).await;
 
         // Prepare the request
         let req = TestRequest::post()
-            .uri("/walk")
+            .uri("/sortest")
             .set_json(&matrix)
             .to_request();
 
@@ -102,5 +110,40 @@ mod tests {
         // Check if the result is correct
         assert_eq!(resp.status, "ok");
         assert_eq!(resp.path.unwrap(), expected);
+    }
+
+    #[actix_web::test]
+    async fn test_sortest_path_rest_endpoint_invalid_matrix() {
+        // Prepare the matrix
+        let matrix = Matrix::new(3, 3, vec![
+            -01.0,  10.0,  18.0, -01.0, -01.0, -01.0, -01.0,
+            -01.0, -01.0,  06.0, -01.0,  03.0, -01.0, -01.0,
+            -01.0, -01.0, -01.0,  03.0, -01.0,  20.0, -01.0,
+            -01.0, -01.0,  02.0, -01.0, -01.0, -01.0,  02.0,
+            -01.0, -01.0, -01.0,  08.0, -01.0, -01.0,  10.0,
+            -01.0, -01.0, -01.0, -01.0, -01.0, -01.0, -01.0,
+            -01.0, -01.0, -01.0, -01.0, -01.0,  05.0, -01.0
+        ]);
+
+        // Prepare the expected result
+        let expected = "The matrix size and dimensions are not the same";
+
+        // Get the result
+        let app = init_service(
+            App::new().service(sortest_path_endpoint)
+        ).await;
+
+        // Prepare the request
+        let req = TestRequest::post()
+            .uri("/sortest")
+            .set_json(&matrix)
+            .to_request();
+
+        // Get the response
+        let resp: Result = call_and_read_body_json(&app, req).await;
+
+        // Check if the result is correct
+        assert_eq!(resp.status, "error");
+        assert_eq!(resp.message.unwrap(), expected);
     }
 }

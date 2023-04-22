@@ -1,0 +1,276 @@
+use log::{error, info, trace};
+use ocl::{Buffer, Context, Device, Kernel, Platform, Program, Queue, Result, SpatialDims};
+
+use crate::models::Matrix;
+
+/// The kernel to use
+const OPENCL_PROGRAM: &'static str = r#"
+__kernel void initialize_algorithm_buffers(__global float *result, __global float *distance, __global int *visited) {
+    // Get the global id based on count of vertexs and assigned for thread
+    int gid = get_global_id(0);
+
+    // Initialize the buffers in parallel
+    if (gid == 0) {
+        distance[gid] = 0;
+        visited[gid] = 1;
+        result[gid] = 0;
+    } else {
+        distance[gid] = FLT_MAX;
+        visited[gid] = 0;
+        result[gid] = FLT_MAX;
+    }
+}
+
+__kernel void shortest_path_algorithm(__global float *result, __global float *matrix, __global float *distance, __global int *visited, int vertex_count) {
+    // Get the global id based on count of vertexs and assigned for thread
+    int gid = get_global_id(0);
+
+    // Validate if the vertex is not visited
+    if (visited[gid] != 1) {
+        // Take the entry vertex
+        visited[gid] = 1;
+
+        // Determinate source position in matrix
+        int source_x = gid / vertex_count;
+        int source_y = gid % vertex_count;
+
+        // Determinate destination position in matrix
+        int dest_x   = (vertex_count - 1) / vertex_count;
+        int dest_y   = (vertex_count - 1) % vertex_count;
+
+        // Calculate the last edge for the vertex
+        int edge_end = (source_x + 1) * vertex_count;
+
+        // Get the start edge
+        for(int edge = gid; edge < edge_end; edge++) {
+            // Get the edge from adjacent matrix
+            float nid = matrix[source_x * vertex_count + edge];
+
+            // Validate if the edge is valid
+            if (nid != 0.0f && nid != FLT_MAX) {
+                // Get the distance fron adjacent matrix
+                float distanceEdge = nid + result[source_x * vertex_count + source_y];
+
+                // Validate if the distance is less than the current distance
+                if (distance[edge] > distanceEdge) {
+                    distance[edge] = distanceEdge;
+                }
+            }
+        }
+    }
+}
+
+__kernel void merge_sortest_path(__global float *result, __global float *distance, __global int *visited) {
+    // Get the global id based on count of vertexs and assigned for thread
+    int gid = get_global_id(0);
+
+    // Get the result
+    if (result[gid] > distance[gid]) {
+        result[gid] = distance[gid];
+        visited[gid] = 1;
+    }
+
+    // Get the distance correctly
+    distance[gid] = result[gid];
+}
+"#;
+
+/// The sortest path service
+///
+/// # Fields
+///
+/// * `device` - The device to use
+/// * `context` - The context to use
+/// * `program` - The program to use
+/// * `queue` - The queue to use
+///
+pub struct SortestPath {
+    queue: Queue,
+    device: Device,
+    context: Context,
+    program: Program,
+}
+
+impl SortestPath {
+    /// Create a new instance of the walker
+    ///
+    /// # Returns
+    ///
+    /// * `Walker` - The walker object
+    ///
+    pub fn new() -> SortestPath {
+        // Get the default platform
+        let platform = Platform::default();
+
+        // Print the initialization info
+        trace!("Initializing OpenCL components before operations...");
+        info!("Using platform: {}", platform.name().unwrap());
+
+        // Prepare OpenCL Elements
+        let device = Device::first(platform).unwrap();
+        let context = Context::builder().devices(device).build().unwrap();
+        let queue = Queue::new(&context, device, None).unwrap();
+        let program = Program::builder()
+            .src(OPENCL_PROGRAM).devices(device)
+            .build(&context).unwrap();
+
+        // Print the device info and start operations
+        trace!("Initialized OpenCL components, starting operations...");
+        info!("Using device: {}", device.name().unwrap());
+
+        // Build the object for the service
+        SortestPath { device, context, program, queue }
+    }
+}
+
+impl SortestPath {
+    /// Process the kernel result
+    ///
+    /// This method will process the result of the kernel and return the result
+    /// of the operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `result` - The result of the kernel
+    /// * `lambda` - The lambda to execute if the result is ok
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Vec<f32>>` - The result of the operation
+    ///
+    fn process_kernel_result(&self, result: Result<()>, lambda: impl FnOnce() -> Result<Vec<f32>>) -> Result<Vec<f32>> {
+        match result {
+            Ok(_) => lambda(),
+            Err(e) => {
+                // Print the error in console
+                error!("Critical error occurred in kernel: {}", e.api_status().unwrap().to_string());
+
+                // Return error code
+                return Err(e);
+            }
+        }
+    }
+
+    /// Returns the best path for hamiltonian walk
+    ///
+    /// This method will return the best path for the hamiltonian walk
+    /// enumerating elements in step order over the vector result.
+    ///
+    /// # Arguments
+    ///
+    /// * `matrix` - The matrix to walk
+    ///
+    /// # Returns
+    ///
+    /// * `Vec<i32>` - The path of the walk
+    ///
+    pub fn get_sortest_path(&self, matrix: Matrix) -> Result<Vec<f32>> {
+        // Print the initialization
+        trace!("Initializing buffers for the kernel...");
+
+        // Instantiate result matrix
+        let result_buffer = Buffer::<f32>::builder()
+            .queue(self.queue.clone())
+            .len(matrix.width).build().unwrap();
+
+        // Instantiate the matrix as buffer
+        let matrix_buffer = Buffer::<f32>::builder()
+            .len(matrix.data.len()).queue(self.queue.clone())
+            .copy_host_slice(&matrix.data)
+            .build().unwrap();
+
+        // Instantiate path matrix
+        let distance_buffer = Buffer::<f32>::builder()
+            .queue(self.queue.clone())
+            .len(matrix.width).build().unwrap();
+
+        let visited_buffer = Buffer::<i32>::builder()
+            .queue(self.queue.clone())
+            .len(matrix.width).build().unwrap();
+
+        // Print the buffers initialization
+        trace!("Buffers initialized, starting kernel...");
+
+        // Instantiate the buffers kernel
+        let initialize_algorithm_buffers = Kernel::builder()
+            .program(&self.program).queue(self.queue.clone())
+            .name("initialize_algorithm_buffers").global_work_size(SpatialDims::One((matrix.width) as usize))
+            .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer)
+            .build().unwrap();
+
+        // Instantiate the main kernel
+        let shortest_path_algorithm = Kernel::builder()
+            .program(&self.program).queue(self.queue.clone())
+            .name("shortest_path_algorithm").global_work_size(SpatialDims::One((matrix.width) as usize))
+            .arg(&result_buffer).arg(&matrix_buffer).arg(&distance_buffer).arg(&visited_buffer).arg(matrix.width as i32)
+            .build().unwrap();
+
+        // Instantiate the merge kernel
+        let merge_sortest_path = Kernel::builder()
+            .program(&self.program).queue(self.queue.clone())
+            .name("merge_sortest_path").global_work_size(SpatialDims::One((matrix.width) as usize))
+            .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer)
+            .build().unwrap();
+
+        // Print the kernel start
+        trace!("Kernel started, enqueueing the operation...");
+
+        // Run the program and wait for it to finish
+        unsafe {
+            self.process_kernel_result(initialize_algorithm_buffers.enq(), || {
+                // TODO: Repeat process until all nodes are visited
+                
+                self.process_kernel_result(shortest_path_algorithm.enq(), || {
+                    self.process_kernel_result(merge_sortest_path.enq(), || {
+                        // Print the end of the operation
+                        trace!("The operation was successfully completed! Preparing the return of result...");
+
+                        // Copy the result to the host
+                        let mut result = vec![0.0; matrix.width];
+                        result_buffer.read(&mut result).enq()?;
+
+                        // Return the result
+                        Ok(result)
+                    })
+                })
+            })
+        }
+    }
+}
+
+impl Drop for SortestPath {
+    fn drop(&mut self) {
+        drop(&self.device);
+        drop(&self.context);
+        drop(&self.program);
+        drop(&self.queue);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_sortest_path() {
+        // Prepare the matrix
+        let matrix = Matrix::new(6, 6,vec![
+            -01.0,  10.0,  18.0, -01.0, -01.0, -01.0, -01.0,
+            -01.0, -01.0,  06.0, -01.0,  03.0, -01.0, -01.0,
+            -01.0, -01.0, -01.0,  03.0, -01.0,  20.0, -01.0,
+            -01.0, -01.0,  02.0, -01.0, -01.0, -01.0,  02.0,
+            -01.0, -01.0, -01.0,  08.0, -01.0, -01.0,  10.0,
+            -01.0, -01.0, -01.0, -01.0, -01.0, -01.0, -01.0,
+            -01.0, -01.0, -01.0, -01.0, -01.0,  05.0, -01.0
+        ]);
+
+        // Prepare the expected result
+        let expected = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+
+        // Get the result
+        let result = SortestPath::new().get_sortest_path(matrix);
+
+        // Check if the result is correct
+        assert_eq!(result.unwrap(), expected);
+    }
+}
