@@ -39,21 +39,22 @@ __kernel void shortest_path_algorithm(__global float *result, __global float *ma
         int dest_y   = (vertex_count - 1) % vertex_count;
 
         // Calculate the last edge for the vertex
+        int edge_start = source_x * vertex_count;
         int edge_end = (source_x + 1) * vertex_count;
 
         // Get the start edge
-        for(int edge = gid; edge < edge_end; edge++) {
+        for(int edge = edge_start; edge < edge_end; edge++) {
             // Get the edge from adjacent matrix
             float nid = matrix[source_x * vertex_count + edge];
 
             // Validate if the edge is valid
             if (nid != 0.0f && nid != FLT_MAX) {
-                // Get the distance fron adjacent matrix
-                float distanceEdge = nid + result[source_x * vertex_count + source_y];
+                // Get the distance
+                float dist = distance[gid] + nid;
 
-                // Validate if the distance is less than the current distance
-                if (distance[edge] > distanceEdge) {
-                    distance[edge] = distanceEdge;
+                // Get the result
+                if (result[edge] > dist) {
+                    result[edge] = dist;
                 }
             }
         }
@@ -215,24 +216,34 @@ impl SortestPath {
         // Print the kernel start
         trace!("Kernel started, enqueueing the operation...");
 
+        // Instantiate the result
+        let mut result = vec![0.0; matrix.width];
+
         // Run the program and wait for it to finish
         unsafe {
             self.process_kernel_result(initialize_algorithm_buffers.enq(), || {
-                // TODO: Repeat process until all nodes are visited
-                
-                self.process_kernel_result(shortest_path_algorithm.enq(), || {
-                    self.process_kernel_result(merge_sortest_path.enq(), || {
-                        // Print the end of the operation
-                        trace!("The operation was successfully completed! Preparing the return of result...");
+                // Copy the result to the host
+                let mut visited_result: Vec<i32> = vec![0; matrix.width];
 
-                        // Copy the result to the host
-                        let mut result = vec![0.0; matrix.width];
-                        result_buffer.read(&mut result).enq()?;
+                // Run the algorithm
+                while visited_result.contains(&0) {
+                    self.process_kernel_result(shortest_path_algorithm.enq(), || {
+                        self.process_kernel_result(merge_sortest_path.enq(), || {
+                            // Print the end of the operation
+                            trace!("The operation was successfully completed! Preparing the return of result...");
 
-                        // Return the result
-                        Ok(result)
-                    })
-                })
+                            // Copy the results to the host
+                            result_buffer.read(&mut result).enq()?;
+                            visited_buffer.read(&mut visited_result).enq()?;
+
+                            // Return dummy result
+                            Ok(vec![0.0; 1])
+                        })
+                    }).expect("Error while merging the sortest path");
+                }
+
+                // Return the result
+                Ok(result)
             })
         }
     }
