@@ -14,6 +14,9 @@ impl Matrix {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct PathResult(i32, f32);
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Result {
     pub path: Option<Vec<f32>>,
     pub status: String,

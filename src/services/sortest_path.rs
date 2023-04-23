@@ -15,7 +15,7 @@ __kernel void initialize_algorithm_buffers(__global float *result, __global floa
         visited[gid] = 1;
         result[gid] = 0;
     } else {
-        distance[gid] = FLT_MAX;
+        distance[gid] = 0;
         visited[gid] = 0;
         result[gid] = FLT_MAX;
     }
@@ -27,34 +27,22 @@ __kernel void shortest_path_algorithm(__global float *result, __global float *ma
 
     // Validate if the vertex is not visited
     if (visited[gid] != 1) {
-        // Take the entry vertex
+        // Mark the vertex as visited
         visited[gid] = 1;
 
-        // Determinate source position in matrix
-        int source_x = gid / vertex_count;
-        int source_y = gid % vertex_count;
-
-        // Determinate destination position in matrix
-        int dest_x   = (vertex_count - 1) / vertex_count;
-        int dest_y   = (vertex_count - 1) % vertex_count;
-
-        // Calculate the last edge for the vertex
-        int edge_start = source_x * vertex_count;
-        int edge_end = (source_x + 1) * vertex_count;
-
         // Get the start edge
-        for(int edge = edge_start; edge < edge_end; edge++) {
+        for(int edge = 0; edge < vertex_count; edge++) {
             // Get the edge from adjacent matrix
-            float nid = matrix[source_x * vertex_count + edge];
+            float weight = matrix[gid * vertex_count + edge];
 
             // Validate if the edge is valid
-            if (nid != 0.0f && nid != FLT_MAX) {
+            if (weight != 0.0f && weight != FLT_MAX) {
                 // Get the distance
-                float dist = distance[gid] + nid;
+                float dist = distance[edge] + weight;
 
                 // Get the result
-                if (result[edge] > dist) {
-                    result[edge] = dist;
+                if (distance[gid] == 0.0 || distance[gid] > dist) {
+                    distance[gid] = dist;
                 }
             }
         }
@@ -68,11 +56,12 @@ __kernel void merge_sortest_path(__global float *result, __global float *distanc
     // Get the result
     if (result[gid] > distance[gid]) {
         result[gid] = distance[gid];
-        visited[gid] = 1;
     }
 
-    // Get the distance correctly
-    distance[gid] = result[gid];
+    // Reset the visited flag
+    if (gid != 0) {
+        visited[gid] = 0;
+    }
 }
 "#;
 
@@ -222,19 +211,16 @@ impl SortestPath {
         // Run the program and wait for it to finish
         unsafe {
             self.process_kernel_result(initialize_algorithm_buffers.enq(), || {
-                // Copy the result to the host
-                let mut visited_result: Vec<i32> = vec![0; matrix.width];
-
                 // Run the algorithm
-                while visited_result.contains(&0) {
+                for _ in 0..matrix.width {
                     self.process_kernel_result(shortest_path_algorithm.enq(), || {
                         self.process_kernel_result(merge_sortest_path.enq(), || {
                             // Print the end of the operation
-                            trace!("The operation was successfully completed! Preparing the return of result...");
+                            trace!("The iteration was successfully completed! Preparing the return of result...");
 
                             // Copy the results to the host
                             result_buffer.read(&mut result).enq()?;
-                            visited_buffer.read(&mut visited_result).enq()?;
+                            trace!("Result: {:?}", result);
 
                             // Return dummy result
                             Ok(vec![0.0; 1])
@@ -266,17 +252,16 @@ mod tests {
     fn test_get_sortest_path() {
         // Prepare the matrix
         let matrix = Matrix::new(6, 6,vec![
-            -01.0,  10.0,  18.0, -01.0, -01.0, -01.0, -01.0,
-            -01.0, -01.0,  06.0, -01.0,  03.0, -01.0, -01.0,
-            -01.0, -01.0, -01.0,  03.0, -01.0,  20.0, -01.0,
-            -01.0, -01.0,  02.0, -01.0, -01.0, -01.0,  02.0,
-            -01.0, -01.0, -01.0,  08.0, -01.0, -01.0,  10.0,
-            -01.0, -01.0, -01.0, -01.0, -01.0, -01.0, -01.0,
-            -01.0, -01.0, -01.0, -01.0, -01.0,  05.0, -01.0
+            01.0, 04.0, 02.0, 00.0, 00.0, 00.0,
+            04.0, 01.0, 01.0, 05.0, 00.0, 00.0,
+            02.0, 01.0, 01.0, 08.0, 10.0, 00.0,
+            00.0, 05.0, 08.0, 01.0, 02.0, 06.0,
+            00.0, 00.0, 10.0, 02.0, 01.0, 02.0,
+            00.0, 00.0, 00.0, 06.0, 02.0, 01.0
         ]);
 
         // Prepare the expected result
-        let expected = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let expected = vec![0.0, 3.0, 2.0, 8.0, 10.0, 12.0];
 
         // Get the result
         let result = SortestPath::new().get_sortest_path(matrix);

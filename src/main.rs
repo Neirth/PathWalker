@@ -16,7 +16,7 @@ async fn main() -> std::io::Result<()> {
     log::set_max_level(LevelFilter::Trace);
 
     // Print the server info
-    info!("Starting server at 127.0.0.1:8080... Please wait...");
+    info!("Starting server at 0.0.0.0:8080... Please wait...");
 
     // Start the server
     HttpServer::new(|| {
@@ -25,5 +25,5 @@ async fn main() -> std::io::Result<()> {
 
         // Return the app instance
         App::new().service(sortest_path_endpoint)
-    }).bind("127.0.0.1:8080")?.run().await
+    }).bind("0.0.0.0:8080")?.run().await
 }
