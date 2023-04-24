@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Install OpenCL dependencies
-      run: sudo apt install -y ocl-icd-libopencl1 pocl-opencl-icd
+      run: sudo apt install -y ocl-icd-libopencl1 ocl-icd-opencl-dev pocl-opencl-icd
     - name: Build
       run: cargo build --verbose
     - name: Run tests
