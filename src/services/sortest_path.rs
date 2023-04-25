@@ -1,5 +1,5 @@
 use log::{error, info, trace};
-use ocl::{Buffer, Context, Device, Kernel, Platform, Program, Queue, Result, SpatialDims};
+use ocl::{Buffer, Context, Device, Kernel, MemFlags, Platform, Program, Queue, Result, SpatialDims};
 
 use crate::models::Matrix;
 
@@ -38,10 +38,10 @@ __kernel void shortest_path_algorithm(__global float *result, __global float *ma
             // Validate if the edge is valid
             if (weight != 0.0f && weight != FLT_MAX) {
                 // Get the distance
-                float dist = distance[edge] + weight;
+                float dist = result[edge] + weight;
 
                 // Get the result
-                if (distance[gid] == 0.0 || distance[gid] > dist) {
+                if (distance[gid] == 0.0 || result[gid] > dist) {
                     distance[gid] = dist;
                 }
             }
@@ -154,62 +154,64 @@ impl SortestPath {
     ///
     /// * `Vec<i32>` - The path of the walk
     ///
-    pub fn get_sortest_path(&self, matrix: Matrix) -> Result<Vec<f32>> {
+    pub  fn get_sortest_path(&self, matrix: Matrix) -> Result<Vec<f32>> {
         // Print the initialization
         trace!("Initializing buffers for the kernel...");
 
-        // Instantiate result matrix
-        let result_buffer = Buffer::<f32>::builder()
-            .queue(self.queue.clone())
-            .len(matrix.width).build().unwrap();
-
-        // Instantiate the matrix as buffer
-        let matrix_buffer = Buffer::<f32>::builder()
-            .len(matrix.data.len()).queue(self.queue.clone())
-            .copy_host_slice(&matrix.data)
-            .build().unwrap();
-
-        // Instantiate path matrix
-        let distance_buffer = Buffer::<f32>::builder()
-            .queue(self.queue.clone())
-            .len(matrix.width).build().unwrap();
-
-        let visited_buffer = Buffer::<i32>::builder()
-            .queue(self.queue.clone())
-            .len(matrix.width).build().unwrap();
-
-        // Print the buffers initialization
-        trace!("Buffers initialized, starting kernel...");
-
-        // Instantiate the buffers kernel
-        let initialize_algorithm_buffers = Kernel::builder()
-            .program(&self.program).queue(self.queue.clone())
-            .name("initialize_algorithm_buffers").global_work_size(SpatialDims::One((matrix.width) as usize))
-            .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer)
-            .build().unwrap();
-
-        // Instantiate the main kernel
-        let shortest_path_algorithm = Kernel::builder()
-            .program(&self.program).queue(self.queue.clone())
-            .name("shortest_path_algorithm").global_work_size(SpatialDims::One((matrix.width) as usize))
-            .arg(&result_buffer).arg(&matrix_buffer).arg(&distance_buffer).arg(&visited_buffer).arg(matrix.width as i32)
-            .build().unwrap();
-
-        // Instantiate the merge kernel
-        let merge_sortest_path = Kernel::builder()
-            .program(&self.program).queue(self.queue.clone())
-            .name("merge_sortest_path").global_work_size(SpatialDims::One((matrix.width) as usize))
-            .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer)
-            .build().unwrap();
-
-        // Print the kernel start
-        trace!("Kernel started, enqueueing the operation...");
-
-        // Instantiate the result
+        // Instantiate the result vector
         let mut result = vec![0.0; matrix.width];
+        let mut distance = vec![0.0; matrix.width];
 
-        // Run the program and wait for it to finish
         unsafe {
+            // Instantiate the matrix as buffer
+            let matrix_buffer = Buffer::<f32>::builder()
+                .queue(self.queue.clone()).len(matrix.data.len())
+                .flags(MemFlags::READ_ONLY).use_host_slice(&matrix.data)
+                .build().unwrap();
+
+            // Instantiate result matrix
+            let result_buffer = Buffer::<f32>::builder()
+                .queue(self.queue.clone()).len(matrix.width)
+                .build().unwrap();
+
+            // Instantiate path matrix
+            let distance_buffer = Buffer::<f32>::builder()
+                .queue(self.queue.clone()).len(matrix.width)
+                .build().unwrap();
+
+            // Instantiate visited matrix
+            let visited_buffer = Buffer::<i32>::builder()
+                .queue(self.queue.clone()).len(matrix.width)
+                .build().unwrap();
+
+            // Print the buffers initialization
+            trace!("Buffers initialized, starting kernel...");
+
+            // Instantiate the buffers kernel
+            let initialize_algorithm_buffers = Kernel::builder()
+                .program(&self.program).queue(self.queue.clone())
+                .name("initialize_algorithm_buffers").global_work_size(SpatialDims::One((matrix.width) as usize))
+                .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer)
+                .build().unwrap();
+
+            // Instantiate the main kernel
+            let shortest_path_algorithm = Kernel::builder()
+                .program(&self.program).queue(self.queue.clone())
+                .name("shortest_path_algorithm").global_work_size(SpatialDims::One((matrix.width) as usize))
+                .arg(&result_buffer).arg(&matrix_buffer).arg(&distance_buffer).arg(&visited_buffer).arg(matrix.width as i32)
+                .build().unwrap();
+
+            // Instantiate the merge kernel
+            let merge_sortest_path = Kernel::builder()
+                .program(&self.program).queue(self.queue.clone())
+                .name("merge_sortest_path").global_work_size(SpatialDims::One((matrix.width) as usize))
+                .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer)
+                .build().unwrap();
+
+            // Print the kernel start
+            trace!("Kernel started, enqueueing the operation...");
+
+            // Run the program and wait for it to finish
             self.process_kernel_result(initialize_algorithm_buffers.enq(), || {
                 // Run the algorithm
                 for _ in 0..matrix.width {
@@ -220,7 +222,11 @@ impl SortestPath {
 
                             // Copy the results to the host
                             result_buffer.read(&mut result).enq()?;
+                            distance_buffer.read(&mut distance).enq()?;
+
+                            // Print the result
                             trace!("Result: {:?}", result);
+                            trace!("Distance: {:?}", distance);
 
                             // Return dummy result
                             Ok(vec![0.0; 1])
