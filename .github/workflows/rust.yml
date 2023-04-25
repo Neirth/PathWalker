@@ -12,15 +12,11 @@ env:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v3
-      - name: Install OpenCL dependencies
-        run: sudo apt install -y ocl-icd-libopencl1 ocl-icd-opencl-dev pocl-opencl-icd clinfo
-      - name: Show OpenCL info
-        run: clinfo --human
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose
+    - uses: actions/checkout@v3
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: cargo test --verbose
