@@ -1,27 +1,29 @@
 use log::{error, info, trace};
 use ocl::{Buffer, Context, Device, Kernel, MemFlags, Platform, Program, Queue, Result, SpatialDims};
 
-use crate::models::Matrix;
+use crate::models::{Matrix, PathResult};
 
 /// The kernel to use
 const OPENCL_PROGRAM: &'static str = r#"
-__kernel void initialize_algorithm_buffers(__global float *result, __global float *distance, __global int *visited) {
+__kernel void initialize_algorithm_buffers(__global float *result, __global float *distance, __global int *visited, __global float *vertex, __global float *vertex_temp) {
     // Get the global id based on count of vertexs and assigned for thread
     int gid = get_global_id(0);
 
     // Initialize the buffers in parallel
     if (gid == 0) {
-        distance[gid] = 0;
         visited[gid] = 1;
         result[gid] = 0;
     } else {
-        distance[gid] = 0;
         visited[gid] = 0;
         result[gid] = FLT_MAX;
     }
+
+    distance[gid] = 0;
+    vertex[gid] = 0;
+    vertex_temp[gid] = 0;
 }
 
-__kernel void shortest_path_algorithm(__global float *result, __global float *matrix, __global float *distance, __global int *visited, int vertex_count) {
+__kernel void shortest_path_algorithm(__global float *result, __global float *matrix, __global float *distance, __global int *visited, __global float *vertex_temp, int vertex_count) {
     // Get the global id based on count of vertexs and assigned for thread
     int gid = get_global_id(0);
 
@@ -43,19 +45,21 @@ __kernel void shortest_path_algorithm(__global float *result, __global float *ma
                 // Get the result
                 if (distance[gid] == 0.0 || result[gid] > dist) {
                     distance[gid] = dist;
+                    vertex_temp[gid] = edge;
                 }
             }
         }
     }
 }
 
-__kernel void merge_sortest_path(__global float *result, __global float *distance, __global int *visited) {
+__kernel void merge_sortest_path(__global float *result, __global float *distance, __global int *visited, __global float *vertex, __global float *vertex_temp) {
     // Get the global id based on count of vertexs and assigned for thread
     int gid = get_global_id(0);
 
     // Get the result
     if (result[gid] > distance[gid]) {
         result[gid] = distance[gid];
+        vertex[gid] = vertex_temp[gid];
     }
 
     // Reset the visited flag
@@ -128,7 +132,7 @@ impl SortestPath {
     ///
     /// * `Result<Vec<f32>>` - The result of the operation
     ///
-    fn process_kernel_result(&self, result: Result<()>, lambda: impl FnOnce() -> Result<Vec<f32>>) -> Result<Vec<f32>> {
+    fn process_kernel_result(&self, result: Result<()>, lambda: impl FnOnce() -> Result<Vec<PathResult>>) -> Result<Vec<PathResult>> {
         match result {
             Ok(_) => lambda(),
             Err(e) => {
@@ -154,12 +158,13 @@ impl SortestPath {
     ///
     /// * `Vec<i32>` - The path of the walk
     ///
-    pub  fn get_sortest_path(&self, matrix: Matrix) -> Result<Vec<f32>> {
+    pub  fn get_sortest_path(&self, matrix: Matrix) -> Result<Vec<PathResult>> {
         // Print the initialization
         trace!("Initializing buffers for the kernel...");
 
         // Instantiate the result vector
         let mut result = vec![0.0; matrix.width];
+        let mut vertex = vec![0.0; matrix.width];
         let mut distance = vec![0.0; matrix.width];
 
         unsafe {
@@ -169,17 +174,27 @@ impl SortestPath {
                 .flags(MemFlags::READ_ONLY).use_host_slice(&matrix.data)
                 .build().unwrap();
 
-            // Instantiate result matrix
+            // Instantiate result vector as buffer
             let result_buffer = Buffer::<f32>::builder()
                 .queue(self.queue.clone()).len(matrix.width)
                 .build().unwrap();
 
-            // Instantiate path matrix
+            // Instantiate distance vector as buffer
             let distance_buffer = Buffer::<f32>::builder()
                 .queue(self.queue.clone()).len(matrix.width)
                 .build().unwrap();
 
-            // Instantiate visited matrix
+            // Instantiate vertex vector as buffer
+            let vertex_buffer = Buffer::<f32>::builder()
+                .queue(self.queue.clone()).len(matrix.width)
+                .build().unwrap();
+
+            // Instantiate vertex temp vector as buffer
+            let vertex_temp_buffer = Buffer::<f32>::builder()
+                .queue(self.queue.clone()).len(matrix.width)
+                .build().unwrap();
+
+            // Instantiate visited vector as buffer
             let visited_buffer = Buffer::<i32>::builder()
                 .queue(self.queue.clone()).len(matrix.width)
                 .build().unwrap();
@@ -191,21 +206,21 @@ impl SortestPath {
             let initialize_algorithm_buffers = Kernel::builder()
                 .program(&self.program).queue(self.queue.clone())
                 .name("initialize_algorithm_buffers").global_work_size(SpatialDims::One((matrix.width) as usize))
-                .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer)
+                .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer).arg(&vertex_buffer).arg(&vertex_temp_buffer)
                 .build().unwrap();
 
             // Instantiate the main kernel
             let shortest_path_algorithm = Kernel::builder()
                 .program(&self.program).queue(self.queue.clone())
                 .name("shortest_path_algorithm").global_work_size(SpatialDims::One((matrix.width) as usize))
-                .arg(&result_buffer).arg(&matrix_buffer).arg(&distance_buffer).arg(&visited_buffer).arg(matrix.width as i32)
-                .build().unwrap();
+                .arg(&result_buffer).arg(&matrix_buffer).arg(&distance_buffer).arg(&visited_buffer).arg(&vertex_temp_buffer)
+                .arg(matrix.width as i32).build().unwrap();
 
             // Instantiate the merge kernel
             let merge_sortest_path = Kernel::builder()
                 .program(&self.program).queue(self.queue.clone())
                 .name("merge_sortest_path").global_work_size(SpatialDims::One((matrix.width) as usize))
-                .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer)
+                .arg(&result_buffer).arg(&distance_buffer).arg(&visited_buffer).arg(&vertex_buffer).arg(&vertex_temp_buffer)
                 .build().unwrap();
 
             // Print the kernel start
@@ -222,20 +237,31 @@ impl SortestPath {
 
                             // Copy the results to the host
                             result_buffer.read(&mut result).enq()?;
+                            vertex_buffer.read(&mut vertex).enq()?;
                             distance_buffer.read(&mut distance).enq()?;
 
                             // Print the result
                             trace!("Result: {:?}", result);
                             trace!("Distance: {:?}", distance);
+                            trace!("Vertex: {:?}", vertex);
 
                             // Return dummy result
-                            Ok(vec![0.0; 1])
+                            Ok(vec![PathResult(0, 0.0)])
                         })
                     }).expect("Error while merging the sortest path");
                 }
 
+                // Compute the result path vector
+                let mut result_path = Vec::<PathResult>::new();
+                for x in 0..matrix.width {
+                    result_path.push(PathResult(vertex[x] as i32, distance[x]));
+                }
+
+                // Print the result of the operation
+                info!("Path to walk {:?}", result_path);
+
                 // Return the result
-                Ok(result)
+                Ok(result_path)
             })
         }
     }
@@ -267,7 +293,14 @@ mod tests {
         ]);
 
         // Prepare the expected result
-        let expected = vec![0.0, 3.0, 2.0, 8.0, 10.0, 12.0];
+        let expected = vec![
+            PathResult(0, 0.0),
+            PathResult(2, 3.0),
+            PathResult(0, 2.0),
+            PathResult(1, 8.0),
+            PathResult(3, 10.0),
+            PathResult(4, 12.0)
+        ];
 
         // Get the result
         let result = SortestPath::new().get_sortest_path(matrix);

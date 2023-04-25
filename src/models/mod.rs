@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Matrix {
     pub width: usize,
     pub height: usize,
@@ -13,12 +13,12 @@ impl Matrix {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PathResult(i32, f32);
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, PartialOrd)]
+pub struct PathResult(pub i32, pub f32);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, PartialOrd)]
 pub struct Result {
-    pub path: Option<Vec<f32>>,
+    pub path: Option<Vec<PathResult>>,
     pub status: String,
     pub message: Option<String>
 }

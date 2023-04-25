@@ -75,6 +75,7 @@ pub async fn sortest_path_endpoint(item: Json<Matrix>) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use actix_web::{test::{call_and_read_body_json, init_service, TestRequest}, App};
+    use crate::models::PathResult;
     use super::*;
 
     #[actix_web::test]
@@ -90,7 +91,14 @@ mod tests {
         ]);
 
         // Prepare the expected result
-        let expected = vec![0.0, 3.0, 2.0, 8.0, 10.0, 12.0];
+        let expected = vec![
+            PathResult(0, 0.0),
+            PathResult(2, 3.0),
+            PathResult(0, 2.0),
+            PathResult(1, 8.0),
+            PathResult(3, 10.0),
+            PathResult(4, 12.0)
+        ];
 
         // Get the result
         let app = init_service(
