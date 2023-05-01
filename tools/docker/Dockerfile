@@ -1,4 +1,4 @@
-FROM ubi9 as builder
+FROM redhat/ubi9:latest as builder
 
 # Install dependencies
 RUN dnf upgrade -y && \
