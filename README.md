@@ -35,7 +35,7 @@ cargo run --release
 PathWalker has a Dockerfile available to deploy it, and we recommend this option as the primary one. To deploy it, use the following command:
 
 ```bash
-docker build -t pathwalker .
+docker build -t pathwalker -f tools/docker/Dockerfile .
 ```
 
 This dockerfile also install a Portable Computing Language (PoCL) driver for OpenCL, so you can run PathWalker on any device with a CPU.
