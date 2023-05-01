@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="./assets/logo.svg?raw=true">
+  <img src="https://github.com/Neirth/PathWalker/blob/master/assets/logo.png?raw=true">
 </p>
-
-# PathWalker
 
 PathWalker is a Rust project that aims to explore the effective parallelism of heavy operations and how to leverage them in a demanding environment like a data center, through the use of OpenCL.
 
