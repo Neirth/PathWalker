@@ -55,7 +55,7 @@ jobs:
     env:
       HELM_EXPERIMENTAL_OCI: 1 #enable OCI support
       HELM_VERSION_TO_INSTALL: 3.5.0 # version of HEL to install
-      GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/path_walker
+      GHCR_IMAGE: ghcr.io/neirth/path_walker
     steps:
       - name: Checkout branch in CI
         uses: actions/checkout@v3
