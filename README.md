@@ -44,7 +44,7 @@ This dockerfile also install a Portable Computing Language (PoCL) driver for Ope
 
 The endpoints available are:
 
-* `POST /shortest`: Returns the shortest path between two points in a graph. Example
+* `POST /sortest`: Returns the shortest path between two points in a graph. Example
 
     Request Example:
     ```json
