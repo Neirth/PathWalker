@@ -83,10 +83,11 @@ jobs:
           context: .
           file: ./tools/docker/Dockerfile
           push: true
-          tags: ${{ env.GHCR_IMAGE }}/runtime:${{ github.sha }}
+          tags: ${{ env.GHCR_IMAGE }}/runtime:${{ github.sha }}, ${{ env.GHCR_IMAGE }}/runtime:latest
           labels: org.opencontainers.image.source
 
       - name: Build and Push Helm Chart into Github Container Registry
         run: |
+          sed -i 's#"latest"#"${{ github.sha }}"#g' tools/helm/values.yaml
           helm chart save ${{ github.workspace }}/tools/helm/ ${{ env.GHCR_IMAGE }}/chart:${{ github.sha }}
-          helm chart push ${{ env.GCR_IMAGE }}/chart:${{ github.sha }}
+          helm chart push ${{ env.GHCR_IMAGE }}/chart:${{ github.sha }}
