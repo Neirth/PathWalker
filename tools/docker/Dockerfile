@@ -15,23 +15,28 @@ RUN dnf upgrade -y && \
 
 # Install RustC and Cargo
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-RUN mkdir /tmp/root_container && yum install \
-    --installroot /tmp/root_container --releasever 9 \
-    --setopt install_weak_deps=false --nodocs -y bash ocl-icd clinfo pocl \
-            /tmp/ocl-icd-2.2.13-4.el9.x86_64.rpm /tmp/hwloc-2.4.1-5.el9.x86_64.rpm /tmp/hwloc-libs-2.4.1-5.el9.x86_64.rpm
 
-# Copy pocl source
+# Copy project source
 COPY . /tmp/path_walker
 
 # Build path_walker
 RUN source "$HOME/.cargo/env" && cd /tmp/path_walker &&  \
     cargo build --release && mkdir /app && mv /tmp/path_walker/target/release/path_walker /app/path_walker
 
-FROM scratch as runtime
+FROM redhat/ubi9:latest as runtime
+
 
 # Copy pocl and path_walker
-COPY --from=builder /tmp/root_container/    /
 COPY --from=builder /app                    /app
+
+RUN dnf upgrade -y && \
+    dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
+                   https://dl.rockylinux.org/pub/rocky/9/AppStream/x86_64/os/Packages/o/ocl-icd-2.2.13-4.el9.x86_64.rpm \
+                   https://dl.rockylinux.org/pub/rocky/9/devel/x86_64/os/Packages/h/hwloc-2.4.1-5.el9.x86_64.rpm \
+                   https://dl.rockylinux.org/pub/rocky/9/devel/x86_64/os/Packages/h/hwloc-libs-2.4.1-5.el9.x86_64.rpm \
+                   https://dl.rockylinux.org/pub/rocky/9/AppStream/x86_64/os/Packages/l/llvm-libs-14.0.6-1.el9.x86_64.rpm && \
+    dnf install -y pocl && rm -Rf /tmp/*rpm
+
 
 # Set working directory
 WORKDIR /app
