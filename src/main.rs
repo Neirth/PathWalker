@@ -8,6 +8,10 @@ use crate::utils::{DEFAULT_LOGGER};
 
 use actix_web::{App, HttpServer};
 use log::{info, LevelFilter};
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

@@ -73,6 +73,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup Rust Build Flags to compile
+        run: |
+          cat << EOF > .cargo/config
+          [build]
+          rustflags = ["-C", "target-feature=sse4.2", "-C", "target-feature=avx2", "-C", "target-cpu=native"]
+          EOF
+
       - name: Login into GitHub Container Registry using Helm
         run: |
           echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ${{ env.GHCR_IMAGE }} --username ${{ github.repository_owner }} --password-stdin
